@@ -282,6 +282,17 @@
         </Setter>
     </Style>
 
+    <!-- ══════════════════════════ ListBox ══════════════════════════ -->
+    <!-- El estilo por defecto de ListBox trae su propio Foreground del tema del sistema (oscuro
+         sobre fondo claro), y ese gana a la herencia para todo su contenido: sin esto, los nombres
+         e iconos de los perfiles se pintan casi en negro sobre el lateral oscuro. -->
+    <Style TargetType="ListBox">
+        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FontFamily" Value="{StaticResource FontBody}"/>
+    </Style>
+
     <!-- ══════════════════════════ ComboBox ══════════════════════════ -->
     <Style x:Key="ComboToggle" TargetType="ToggleButton">
         <Setter Property="Focusable" Value="False"/>

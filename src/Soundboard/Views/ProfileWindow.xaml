@@ -9,6 +9,7 @@
         <Style x:Key="IconCell" TargetType="ListBoxItem">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
