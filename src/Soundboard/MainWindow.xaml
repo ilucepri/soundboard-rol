@@ -1,0 +1,303 @@
+<Window x:Class="Soundboard.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Soundboard de rol" Height="740" Width="1140" MinHeight="520" MinWidth="880"
+        Background="{StaticResource Bg}" AllowDrop="True" Drop="OnDropFiles" DragOver="OnDragOverFiles"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal">
+
+    <Window.Resources>
+        <!-- Zona pulsable del pad: sin fondo propio, el color lo pone la tarjeta de detrás. -->
+        <Style x:Key="PadButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="10,8"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#22FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#33000000"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Entrada de la lista de perfiles. -->
+        <Style x:Key="ProfileItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Root" CornerRadius="6" Background="Transparent"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource SurfaceAlt}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource SurfaceAlt}"/>
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Root" Property="BorderThickness" Value="2,0,0,0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ==================== Barra de salidas ==================== -->
+        <Border Grid.Row="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource BorderBrushKey}"
+                BorderThickness="0,0,0,1" Padding="18,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Salida hacia Wave Link: lo que oyen los demás. -->
+                <StackPanel Grid.Column="0" Margin="0,0,28,0">
+                    <TextBlock Text="EMISIÓN — lo que oyen en Discord" Style="{StaticResource Label}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox Width="250" ItemsSource="{Binding Devices}"
+                                  SelectedItem="{Binding BroadcastDevice}" DisplayMemberPath="Name"/>
+                        <Slider Width="90" Margin="12,0,8,0" VerticalAlignment="Center"
+                                Minimum="0" Maximum="1" Value="{Binding BroadcastVolume}"/>
+                        <TextBlock Width="42" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
+                                   Text="{Binding BroadcastVolume, Converter={StaticResource Percent}}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Salida de monitor: lo que oyes tú. -->
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="MONITOR — lo que oyes tú" Style="{StaticResource Label}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox Width="250" ItemsSource="{Binding Devices}"
+                                  SelectedItem="{Binding MonitorDevice}" DisplayMemberPath="Name"/>
+                        <Slider Width="90" Margin="12,0,8,0" VerticalAlignment="Center"
+                                Minimum="0" Maximum="1" Value="{Binding MonitorVolume}"/>
+                        <TextBlock Width="42" VerticalAlignment="Center" Foreground="{StaticResource Muted}"
+                                   Text="{Binding MonitorVolume, Converter={StaticResource Percent}}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
+                    <Button Content="⟳  Dispositivos" Command="{Binding RefreshDevicesCommand}"
+                            ToolTip="Volver a leer los dispositivos de Windows"/>
+                    <Button Content="■  PARAR TODO" Margin="10,0,0,0" MinWidth="140"
+                            Style="{StaticResource DangerButton}" Command="{Binding StopAllCommand}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ==================== Cuerpo ==================== -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Perfiles -->
+            <Border Grid.Column="0" Background="{StaticResource Surface}"
+                    BorderBrush="{StaticResource BorderBrushKey}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="10,14,10,10">
+                    <Grid DockPanel.Dock="Top" Margin="4,0,0,10">
+                        <TextBlock Text="PERFILES" Style="{StaticResource Label}" VerticalAlignment="Center"/>
+                        <Button Content="+" HorizontalAlignment="Right" Padding="10,0" FontSize="16"
+                                Style="{StaticResource IconButton}" Command="{Binding AddProfileCommand}"
+                                ToolTip="Crear un perfil nuevo"/>
+                    </Grid>
+
+                    <ListBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}"
+                             ItemContainerStyle="{StaticResource ProfileItem}"
+                             Background="Transparent" BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal"
+                                            Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <StackPanel.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Renombrar…"
+                                                      Command="{Binding PlacementTarget.Tag.RenameProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Cambiar icono…"
+                                                      Command="{Binding PlacementTarget.Tag.ChangeProfileIconCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <Separator/>
+                                            <MenuItem Header="Borrar perfil"
+                                                      Command="{Binding PlacementTarget.Tag.DeleteProfileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        </ContextMenu>
+                                    </StackPanel.ContextMenu>
+
+                                    <TextBlock Text="{Binding Icon}" FontSize="15" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Name}" Margin="9,0,0,0" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Rejilla de pads -->
+            <DockPanel Grid.Column="1" Margin="20,16,20,10">
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding SelectedProfile.Icon}" FontSize="20" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding SelectedProfile.Name}" FontSize="20" FontWeight="SemiBold"
+                                   Margin="10,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <Button Content="+  Añadir sonidos" HorizontalAlignment="Right"
+                            Style="{StaticResource AccentButton}" Command="{Binding AddSoundsCommand}"/>
+                </Grid>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid>
+                        <!-- Estado vacío -->
+                        <StackPanel Margin="0,80,0,0" HorizontalAlignment="Center"
+                                    Visibility="{Binding SelectedProfile.Pads, Converter={StaticResource EmptyToVisibility}}">
+                            <TextBlock Text="🎧" FontSize="42" HorizontalAlignment="Center" Opacity="0.5"/>
+                            <TextBlock Text="Este perfil todavía no tiene sonidos" FontSize="15"
+                                       Foreground="{StaticResource Muted}" Margin="0,14,0,0"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="Arrastra ficheros aquí, o usa «Añadir sonidos»"
+                                       Foreground="{StaticResource Muted}" Opacity="0.7" Margin="0,6,0,0"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <ItemsControl ItemsSource="{Binding SelectedProfile.Pads}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="164" Height="112" Margin="0,0,12,12" CornerRadius="10"
+                                            Background="{Binding Color, Converter={StaticResource HexToBrush}}"
+                                            BorderThickness="2" BorderBrush="Transparent"
+                                            Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Renombrar…"
+                                                          Command="{Binding PlacementTarget.Tag.RenamePadCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <MenuItem Header="Reproducir en bucle" IsCheckable="True"
+                                                          IsChecked="{Binding Loop, Mode=TwoWay}"/>
+                                                <MenuItem Header="Color">
+                                                    <MenuItem Header="Terracota" Command="{Binding SetColorCommand}" CommandParameter="#B4654A"/>
+                                                    <MenuItem Header="Púrpura"   Command="{Binding SetColorCommand}" CommandParameter="#7C6AA6"/>
+                                                    <MenuItem Header="Turquesa"  Command="{Binding SetColorCommand}" CommandParameter="#48788A"/>
+                                                    <MenuItem Header="Oro"       Command="{Binding SetColorCommand}" CommandParameter="#A2874A"/>
+                                                    <MenuItem Header="Vino"      Command="{Binding SetColorCommand}" CommandParameter="#8A5566"/>
+                                                    <MenuItem Header="Musgo"     Command="{Binding SetColorCommand}" CommandParameter="#4F7A5C"/>
+                                                    <MenuItem Header="Azul"      Command="{Binding SetColorCommand}" CommandParameter="#5A6C9C"/>
+                                                    <MenuItem Header="Cobre"     Command="{Binding SetColorCommand}" CommandParameter="#9A5D3E"/>
+                                                </MenuItem>
+                                                <Separator/>
+                                                <MenuItem Header="Quitar del perfil"
+                                                          Command="{Binding PlacementTarget.Tag.RemovePadCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <Button Grid.Row="0" Style="{StaticResource PadButton}"
+                                                    Command="{Binding TriggerCommand}"
+                                                    ToolTip="{Binding FileName}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" Foreground="White"
+                                                               FontWeight="SemiBold" FontSize="14"
+                                                               TextWrapping="Wrap" TextAlignment="Center"
+                                                               MaxHeight="54" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Error}" Foreground="#FFD9D2" FontSize="11"
+                                                               TextAlignment="Center" Margin="0,4,0,0" TextWrapping="Wrap"
+                                                               Visibility="{Binding Error, Converter={StaticResource TextToVisibility}}"/>
+                                                </StackPanel>
+                                            </Button>
+
+                                            <!-- Indicadores: bucle arriba a la derecha, "sonando" arriba a la izquierda -->
+                                            <TextBlock Grid.Row="0" Text="↻" Foreground="#CCFFFFFF" FontSize="14"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                       Margin="0,6,9,0" IsHitTestVisible="False"
+                                                       Visibility="{Binding Loop, Converter={StaticResource BoolToVisibility}}"/>
+                                            <Ellipse Grid.Row="0" Width="8" Height="8" Fill="{StaticResource Playing}"
+                                                     HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                     Margin="9,8,0,0" IsHitTestVisible="False"
+                                                     Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}"/>
+
+                                            <Border Grid.Row="1" Background="#3D000000" CornerRadius="0,0,8,8"
+                                                    Padding="10,3,10,5">
+                                                <Slider Minimum="0" Maximum="1" Value="{Binding Volume}"
+                                                        ToolTip="Volumen de este sonido"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="{StaticResource Playing}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsLoading}" Value="True">
+                                                        <Setter Property="Opacity" Value="0.55"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </ScrollViewer>
+            </DockPanel>
+        </Grid>
+
+        <!-- ==================== Barra de estado ==================== -->
+        <Border Grid.Row="2" Background="{StaticResource Surface}" BorderBrush="{StaticResource BorderBrushKey}"
+                BorderThickness="0,1,0,0" Padding="18,8">
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="⚠  Elige una salida de EMISIÓN o no se oirá nada en Discord"
+                               Foreground="{StaticResource Accent}" FontSize="12" FontWeight="SemiBold"
+                               Visibility="{Binding NeedsBroadcastDevice, Converter={StaticResource BoolToVisibility}}"/>
+                    <TextBlock Text="{Binding Status}" Foreground="{StaticResource Muted}" FontSize="12"
+                               TextTrimming="CharacterEllipsis"
+                               Visibility="{Binding NeedsBroadcastDevice, Converter={StaticResource InverseBoolToVisibility}}"/>
+                </StackPanel>
+                <TextBlock HorizontalAlignment="Right" Foreground="{StaticResource Muted}" FontSize="12"
+                           Opacity="0.7" VerticalAlignment="Center"
+                           Text="Click para sonar · otra vez para parar · click derecho para opciones"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
