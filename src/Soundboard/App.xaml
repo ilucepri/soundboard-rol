@@ -5,10 +5,11 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="Themes/Dark.xaml"/>
+                <ResourceDictionary Source="Themes/Nocturne.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <views:HexToBrushConverter x:Key="HexToBrush"/>
+            <views:ProgressToStarConverter x:Key="ProgressToStar"/>
             <views:PercentConverter x:Key="Percent"/>
             <views:TextToVisibilityConverter x:Key="TextToVisibility"/>
             <views:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Soundboard.Models;
 
@@ -18,11 +19,15 @@ public sealed partial class ProfileViewModel : ObservableObject
         _name = model.Name;
         _icon = model.Icon;
         Pads = new ObservableCollection<PadViewModel>(pads);
+        Pads.CollectionChanged += OnPadsChanged;
     }
 
     public Profile Model { get; }
 
     public ObservableCollection<PadViewModel> Pads { get; }
+
+    /// <summary>Lo muestra la barra lateral junto al nombre.</summary>
+    public int PadCount => Pads.Count;
 
     public void Add(PadViewModel pad)
     {
@@ -43,6 +48,9 @@ public sealed partial class ProfileViewModel : ObservableObject
     {
         foreach (var pad in Pads) pad.Stop();
     }
+
+    void OnPadsChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        OnPropertyChanged(nameof(PadCount));
 
     partial void OnNameChanged(string value)
     {

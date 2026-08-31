@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.IO;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -8,6 +10,12 @@ using Soundboard.Models;
 using Soundboard.Services;
 
 namespace Soundboard.ViewModels;
+
+public enum MainView
+{
+    Board,
+    Library
+}
 
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
@@ -23,17 +31,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     static readonly string[] VirtualCableHints =
         ["wave link sfx", "wave link aux", "wave link", "cable input", "vb-audio", "voicemeeter", "virtual"];
 
-    static readonly string[] PadPalette =
+    public static readonly string[] PadPalette =
     [
         "#B4654A", "#7C6AA6", "#48788A", "#A2874A",
         "#8A5566", "#4F7A5C", "#5A6C9C", "#9A5D3E"
     ];
+
+    /// <summary>El reloj que refresca barras de progreso y el contador de "sonando".</summary>
+    static readonly TimeSpan UiTick = TimeSpan.FromMilliseconds(90);
 
     readonly ProfileStore _store;
     readonly AudioDeviceService _deviceService;
     readonly AudioEngine _engine;
     readonly IDialogService _dialogs;
     readonly DispatcherTimer _saveTimer;
+    readonly DispatcherTimer _uiTimer;
     readonly AppSettings _settings;
 
     bool _suppressDeviceSwitch;
@@ -44,6 +56,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] double _broadcastVolume;
     [ObservableProperty] double _monitorVolume;
     [ObservableProperty] string? _status;
+    [ObservableProperty] string _searchText = "";
+    [ObservableProperty] MainView _activeView = MainView.Board;
+    [ObservableProperty] string _playingLabel = "Nada sonando";
 
     public MainViewModel(ProfileStore store, AudioDeviceService deviceService, AudioEngine engine, IDialogService dialogs)
     {
@@ -55,8 +70,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); SaveProfiles(); };
 
+        _uiTimer = new DispatcherTimer { Interval = UiTick };
+        _uiTimer.Tick += (_, _) => OnUiTick();
+
         Profiles = [];
         Devices = [];
+        VisiblePads = [];
+        LibraryEntries = [];
 
         foreach (var profile in _store.LoadProfiles())
             Profiles.Add(BuildProfile(profile));
@@ -78,6 +98,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<ProfileViewModel> Profiles { get; }
 
     public ObservableCollection<AudioDeviceInfo> Devices { get; }
+
+    /// <summary>Los pads del perfil activo que pasan el filtro del buscador.</summary>
+    public ObservableCollection<PadViewModel> VisiblePads { get; }
+
+    public ObservableCollection<LibraryEntry> LibraryEntries { get; }
+
+    public bool IsBoardView => ActiveView == MainView.Board;
+
+    public bool IsLibraryView => ActiveView == MainView.Library;
+
+    public string BoardSubtitle
+    {
+        get
+        {
+            int count = SelectedProfile?.Pads.Count ?? 0;
+            string sounds = count == 1 ? "1 sonido" : $"{count} sonidos";
+            return $"{sounds} · click para sonar, click otra vez para parar";
+        }
+    }
 
     // ---- Dispositivos ----------------------------------------------------
 
@@ -113,6 +152,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             .Select(hint => devices.FirstOrDefault(d =>
                 d.Name.Contains(hint, StringComparison.CurrentCultureIgnoreCase)))
             .FirstOrDefault(d => d is not null);
+
         // Si el cable virtual resulta ser también el dispositivo por defecto, no lo pongas en las dos
         // salidas: sonaría el doble de fuerte por el mismo sitio.
         var monitor = devices.FirstOrDefault(d => d.IsDefault && d.Id != cable?.Id);
@@ -133,7 +173,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_suppressDeviceSwitch) return;
         var error = _engine.SetBroadcastDevice(string.IsNullOrEmpty(value.Id) ? null : value.Id);
         _settings.BroadcastDeviceId = string.IsNullOrEmpty(value.Id) ? null : value.Id;
-        Status = error ?? (string.IsNullOrEmpty(value.Id) ? null : $"Emitiendo por {value.Name}");
+        Status = error ?? (string.IsNullOrEmpty(value.Id) ? "Sin salida de emisión" : $"Emitiendo por {value.Name}");
         SaveSettings();
     }
 
@@ -158,13 +198,52 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _settings.MonitorVolume = value;
     }
 
+    // ---- Vistas y búsqueda -----------------------------------------------
+
+    partial void OnActiveViewChanged(MainView value)
+    {
+        OnPropertyChanged(nameof(IsBoardView));
+        OnPropertyChanged(nameof(IsLibraryView));
+        if (value == MainView.Library) RebuildLibrary();
+    }
+
+    [RelayCommand]
+    void ShowLibrary() => ActiveView = MainView.Library;
+
+    [RelayCommand]
+    void ShowBoard() => ActiveView = MainView.Board;
+
+    partial void OnSearchTextChanged(string value) => RefreshVisiblePads();
+
+    void RefreshVisiblePads()
+    {
+        VisiblePads.Clear();
+        if (SelectedProfile is null) return;
+
+        var term = SearchText?.Trim() ?? "";
+        foreach (var pad in SelectedProfile.Pads)
+        {
+            if (term.Length == 0 || pad.Name.Contains(term, StringComparison.CurrentCultureIgnoreCase))
+                VisiblePads.Add(pad);
+        }
+    }
+
     // ---- Perfiles --------------------------------------------------------
 
     partial void OnSelectedProfileChanged(ProfileViewModel? oldValue, ProfileViewModel? newValue)
     {
         oldValue?.StopAll();
+        if (oldValue is not null) oldValue.Pads.CollectionChanged -= OnSelectedPadsChanged;
+
+        // Cambiar de perfil vuelve al tablero y limpia el filtro anterior.
+        SearchText = "";
+        ActiveView = MainView.Board;
+        RefreshVisiblePads();
+        OnPropertyChanged(nameof(BoardSubtitle));
 
         if (newValue is null) return;
+        newValue.Pads.CollectionChanged += OnSelectedPadsChanged;
+
         _settings.LastProfileId = newValue.Model.Id;
         SaveSettings();
 
@@ -176,39 +255,77 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    void OnSelectedPadsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshVisiblePads();
+        OnPropertyChanged(nameof(BoardSubtitle));
+    }
+
     [RelayCommand]
     void AddProfile()
     {
-        var name = _dialogs.AskText("Nuevo perfil", "¿Cómo se llama?", "");
-        if (string.IsNullOrWhiteSpace(name)) return;
+        var edit = _dialogs.EditProfile("Nuevo perfil", "", "🎲");
+        if (edit is null) return;
 
-        var profile = BuildProfile(new Profile { Name = name.Trim() });
+        var profile = BuildProfile(new Profile
+        {
+            Name = string.IsNullOrWhiteSpace(edit.Name) ? "Nuevo perfil" : edit.Name.Trim(),
+            Icon = string.IsNullOrWhiteSpace(edit.Icon) ? "🎲" : edit.Icon.Trim()
+        });
+
         Profiles.Add(profile);
         SelectedProfile = profile;
         SaveProfiles();
     }
 
     [RelayCommand]
-    void RenameProfile(ProfileViewModel? profile)
+    void EditProfile(ProfileViewModel? profile)
     {
         if (profile is null) return;
-        var name = _dialogs.AskText("Renombrar perfil", "Nuevo nombre", profile.Name);
-        if (!string.IsNullOrWhiteSpace(name)) profile.Name = name.Trim();
+        var edit = _dialogs.EditProfile("Editar perfil", profile.Name, profile.Icon);
+        if (edit is null) return;
+
+        profile.Name = string.IsNullOrWhiteSpace(edit.Name) ? "Nuevo perfil" : edit.Name.Trim();
+        profile.Icon = string.IsNullOrWhiteSpace(edit.Icon) ? "🎲" : edit.Icon.Trim();
+        SaveProfiles();
     }
 
     [RelayCommand]
-    void ChangeProfileIcon(ProfileViewModel? profile)
+    void DuplicateProfile(ProfileViewModel? profile)
     {
         if (profile is null) return;
-        var icon = _dialogs.AskText("Icono del perfil", "Pega aquí un emoji", profile.Icon);
-        if (!string.IsNullOrWhiteSpace(icon)) profile.Icon = icon.Trim();
+
+        var copy = new Profile
+        {
+            Name = $"{profile.Name} (copia)",
+            Icon = profile.Icon,
+            Pads = [.. profile.Model.Pads.Select(p => new SoundPad
+            {
+                Name = p.Name,
+                FilePath = p.FilePath,
+                Volume = p.Volume,
+                Loop = p.Loop,
+                Color = p.Color,
+                TrimStart = p.TrimStart,
+                TrimEnd = p.TrimEnd,
+                Shortcut = p.Shortcut,
+                DurationSeconds = p.DurationSeconds
+            })]
+        };
+
+        var vm = BuildProfile(copy);
+        Profiles.Insert(Profiles.IndexOf(profile) + 1, vm);
+        SelectedProfile = vm;
+        Status = $"Duplicado «{profile.Name}»";
+        SaveProfiles();
     }
 
     [RelayCommand]
     void DeleteProfile(ProfileViewModel? profile)
     {
         if (profile is null) return;
-        if (!_dialogs.Confirm("Borrar perfil", $"¿Seguro que quieres borrar «{profile.Name}» y sus {profile.Pads.Count} sonidos?\n\nLos ficheros de audio no se tocan."))
+        if (!_dialogs.Confirm("Borrar perfil",
+                $"¿Seguro que quieres borrar «{profile.Name}» y sus {profile.Pads.Count} sonidos?\n\nLos ficheros de audio no se tocan."))
             return;
 
         profile.StopAll();
@@ -243,13 +360,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 FilePath = path,
                 Color = PadPalette[(profile.Pads.Count + added.Count) % PadPalette.Length]
             };
-            var vm = new PadViewModel(pad, _engine, RequestSave);
+            var vm = BuildPad(pad);
             profile.Add(vm);
             added.Add(vm);
         }
 
         if (added.Count == 0) return;
 
+        ActiveView = MainView.Board;
         Status = added.Count == 1 ? $"Añadido «{added[0].Name}»" : $"Añadidos {added.Count} sonidos";
         SaveProfiles();
         _ = Task.Run(async () =>
@@ -259,19 +377,44 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    void EditPad(PadViewModel? pad)
+    {
+        if (pad is null) return;
+
+        switch (_dialogs.EditPad(pad))
+        {
+            case PadEditResult.Save:
+                Status = $"Guardado «{pad.Name}»";
+                RefreshVisiblePads();
+                SaveProfiles();
+                break;
+            case PadEditResult.Remove:
+                RemovePad(pad);
+                break;
+        }
+    }
+
+    [RelayCommand]
     void RemovePad(PadViewModel? pad)
     {
         if (pad is null || SelectedProfile is null) return;
+        var name = pad.Name;
         SelectedProfile.Remove(pad);
+        Status = $"Quitado «{name}»";
         SaveProfiles();
     }
 
     [RelayCommand]
-    void RenamePad(PadViewModel? pad)
+    void RevealPad(PadViewModel? pad)
+    {
+        if (pad is not null) _dialogs.RevealInExplorer(pad.FilePath);
+    }
+
+    [RelayCommand]
+    void ToggleLoop(PadViewModel? pad)
     {
         if (pad is null) return;
-        var name = _dialogs.AskText("Renombrar sonido", "Nuevo nombre", pad.Name);
-        if (!string.IsNullOrWhiteSpace(name)) pad.Name = name.Trim();
+        pad.Loop = !pad.Loop;
     }
 
     [RelayCommand]
@@ -282,10 +425,94 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Status = "Todo parado";
     }
 
+    /// <summary>Dispara el pad cuya tecla coincide. Devuelve false si ninguno la tiene asignada.</summary>
+    public bool TriggerShortcut(string key)
+    {
+        var pad = SelectedProfile?.Pads.FirstOrDefault(p =>
+            string.Equals(p.Shortcut, key, StringComparison.CurrentCultureIgnoreCase));
+        if (pad is null) return false;
+
+        _ = pad.TriggerAsync();
+        return true;
+    }
+
+    // ---- Biblioteca ------------------------------------------------------
+
+    void RebuildLibrary()
+    {
+        LibraryEntries.Clear();
+
+        var byPath = new Dictionary<string, (TimeSpan Duration, List<string> UsedBy)>(
+            StringComparer.CurrentCultureIgnoreCase);
+
+        foreach (var profile in Profiles)
+        foreach (var pad in profile.Pads)
+        {
+            if (!byPath.TryGetValue(pad.FilePath, out var entry))
+                entry = (pad.Duration, []);
+
+            if (entry.Duration <= TimeSpan.Zero) entry = (pad.Duration, entry.UsedBy);
+            if (!entry.UsedBy.Contains(profile.Name)) entry.UsedBy.Add(profile.Name);
+
+            byPath[pad.FilePath] = entry;
+        }
+
+        foreach (var (path, entry) in byPath.OrderBy(p => Path.GetFileName(p.Key), StringComparer.CurrentCultureIgnoreCase))
+            LibraryEntries.Add(new LibraryEntry(path, entry.Duration, entry.UsedBy));
+    }
+
+    [RelayCommand]
+    void AddFromLibrary(LibraryEntry? entry)
+    {
+        if (entry is null) return;
+        AddFiles([entry.FilePath]);
+    }
+
+    // ---- Reloj de la interfaz --------------------------------------------
+
+    void OnPadPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PadViewModel.IsPlaying)) return;
+
+        UpdatePlayingLabel();
+        if (!_uiTimer.IsEnabled) _uiTimer.Start();
+    }
+
+    void OnUiTick()
+    {
+        if (SelectedProfile is not null)
+            foreach (var pad in SelectedProfile.Pads)
+                if (pad.IsPlaying) pad.RefreshProgress();
+
+        // Con nada sonando el reloj no tiene nada que refrescar; se vuelve a arrancar solo
+        // en cuanto un pad cambie a "sonando".
+        if (CountPlaying() == 0) _uiTimer.Stop();
+    }
+
+    int CountPlaying() => Profiles.Sum(p => p.Pads.Count(pad => pad.IsPlaying));
+
+    void UpdatePlayingLabel()
+    {
+        int count = CountPlaying();
+        PlayingLabel = count switch
+        {
+            0 => "Nada sonando",
+            1 => "1 sonando",
+            _ => $"{count} sonando"
+        };
+    }
+
     // ---- Persistencia ----------------------------------------------------
 
     ProfileViewModel BuildProfile(Profile model) =>
-        new(model, model.Pads.Select(p => new PadViewModel(p, _engine, RequestSave)), RequestSave);
+        new(model, model.Pads.Select(BuildPad), RequestSave);
+
+    PadViewModel BuildPad(SoundPad model)
+    {
+        var pad = new PadViewModel(model, new PadContext(_engine, RequestSave, message => Status = message));
+        pad.PropertyChanged += OnPadPropertyChanged;
+        return pad;
+    }
 
     /// <summary>Guardado con retardo: mover un deslizador no debe escribir en disco en cada píxel.</summary>
     void RequestSave()
@@ -301,6 +528,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _saveTimer.Stop();
+        _uiTimer.Stop();
         SaveProfiles();
         SaveSettings();
     }

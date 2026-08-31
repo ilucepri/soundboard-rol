@@ -9,6 +9,7 @@
     <RootNamespace>Soundboard</RootNamespace>
     <AssemblyName>Soundboard</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Soundboard.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

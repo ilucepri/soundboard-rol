@@ -91,8 +91,10 @@ public sealed class AudioEngine : IDisposable
     }
 
     /// <summary>Dispara un sonido. Devuelve null si no hay ninguna salida configurada.</summary>
-    public PlaybackHandle? Play(ISoundSource source, float volume, bool loop)
+    public PlaybackHandle? Play(ISoundSource source, float volume, SoundSlice slice)
     {
+        slice = slice.Sanitized();
+
         OutputBus? broadcast, monitor;
         lock (_gate) (broadcast, monitor) = (_broadcast, _monitor);
 
@@ -102,7 +104,10 @@ public sealed class AudioEngine : IDisposable
 
         if (voices.Count == 0) return null;
 
-        var handle = new PlaybackHandle(voices);
+        long totalSamples = (long)((slice.End - slice.Start) * source.Duration.TotalSeconds
+                                   * AudioFormat.SampleRate * AudioFormat.Channels);
+
+        var handle = new PlaybackHandle(voices, totalSamples, slice.Loop);
         _active[handle] = 0;
         handle.Ended += (_, _) => _active.TryRemove(handle, out _);
         return handle;
@@ -112,7 +117,7 @@ public sealed class AudioEngine : IDisposable
             if (bus is null) return;
             try
             {
-                var voice = new Voice(source.Open(loop), volume);
+                var voice = new Voice(source.Open(slice), volume);
                 bus.Add(voice);
                 voices.Add(voice);
             }

@@ -18,6 +18,7 @@ public sealed class Voice : ISampleProvider
     float _volume;
     int _fadeRemaining = -1;
     bool _finished;
+    long _samplesRead;
 
     public Voice(SoundStream stream, float volume)
     {
@@ -37,6 +38,9 @@ public sealed class Voice : ISampleProvider
         get => Volatile.Read(ref _volume);
         set => Volatile.Write(ref _volume, value);
     }
+
+    /// <summary>Muestras entregadas hasta ahora. La UI la lee para pintar la barra de progreso.</summary>
+    public long SamplesRead => Interlocked.Read(ref _samplesRead);
 
     /// <summary>Pide el final con rampa. Idempotente.</summary>
     public void BeginStop()
@@ -80,6 +84,7 @@ public sealed class Voice : ISampleProvider
         }
 
         if (read == 0) Finish();
+        else Interlocked.Add(ref _samplesRead, read);
         return read;
     }
 
