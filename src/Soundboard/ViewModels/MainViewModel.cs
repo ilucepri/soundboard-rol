@@ -28,8 +28,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// emisión ahí el sonido entra directamente en ese canal, sin asignar la app a mano. SFX es el
     /// canal pensado justo para esto.
     /// </summary>
+    /// Los canales de Wave Link se pueden renombrar, y al hacerlo pierden el prefijo: un canal SFX
+    /// puede aparecer como "Wave Link SFX (Elgato Wave:3)" o simplemente como "SFX (Elgato Wave:3)".
+    /// Por eso hay pistas con y sin prefijo. No buscamos "elgato" a secas a propósito: eso también
+    /// casaría con la salida de auriculares física del Wave:3, que no es un canal del mezclador.
     static readonly string[] VirtualCableHints =
-        ["wave link sfx", "wave link aux", "wave link", "cable input", "vb-audio", "voicemeeter", "virtual"];
+        ["wave link sfx", "sfx", "wave link aux", "wave link", "cable input", "vb-audio", "voicemeeter", "virtual"];
 
     public static readonly string[] PadPalette =
     [
@@ -49,6 +53,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     readonly AppSettings _settings;
 
     bool _suppressDeviceSwitch;
+
+    /// <summary>Último error al abrir una salida, para que no lo tape un mensaje informativo.</summary>
+    string? _lastDeviceError;
 
     [ObservableProperty] ProfileViewModel? _selectedProfile;
     [ObservableProperty] AudioDeviceInfo _broadcastDevice = NoDevice;
@@ -123,8 +130,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void RefreshDevices()
     {
-        var (broadcastId, monitorId) = (BroadcastDevice.Id, MonitorDevice.Id);
-
         _suppressDeviceSwitch = true;
         Devices.Clear();
         Devices.Add(NoDevice);
@@ -132,9 +137,57 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Devices.Add(device);
         _suppressDeviceSwitch = false;
 
-        // Al arrancar todavía no hay selección: recuperamos la que quedó guardada.
-        BroadcastDevice = FindDevice(string.IsNullOrEmpty(broadcastId) ? _settings.BroadcastDeviceId : broadcastId);
-        MonitorDevice = FindDevice(string.IsNullOrEmpty(monitorId) ? _settings.MonitorDeviceId : monitorId);
+        // Los ajustes van siempre al día con la selección actual, así que reconstruirla desde ahí
+        // sirve tanto al arrancar como al pulsar «Dispositivos».
+        _lastDeviceError = null;
+        var broadcast = ResolveBroadcast(out string? notice);
+        BroadcastDevice = broadcast;
+        MonitorDevice = Resolve(_settings.MonitorDeviceId, _settings.MonitorDeviceName);
+
+        // Se asigna después, porque cambiar el dispositivo pisa Status con su propio mensaje.
+        // Un fallo real al abrir manda sobre el aviso informativo: si no, el error se pierde.
+        if (_lastDeviceError is not null) Status = _lastDeviceError;
+        else if (notice is not null) Status = notice;
+    }
+
+    /// <summary>
+    /// Recupera un dispositivo guardado. Primero por id, y si ya no existe, por nombre: Wave Link
+    /// recrea sus endpoints con id nuevo en cuanto tocas los canales, y entonces el id guardado
+    /// apunta al vacío y la app se queda muda sin motivo aparente.
+    /// </summary>
+    AudioDeviceInfo Resolve(string? id, string? name)
+    {
+        if (!string.IsNullOrEmpty(id) && Devices.FirstOrDefault(d => d.Id == id) is { } byId)
+            return byId;
+
+        if (!string.IsNullOrEmpty(name) &&
+            Devices.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.CurrentCultureIgnoreCase)) is { } byName)
+            return byName;
+
+        return NoDevice;
+    }
+
+    /// <summary>
+    /// Como <see cref="Resolve"/>, pero si la salida de emisión ha desaparecido del todo propone el
+    /// cable virtual que encuentre. Quedarse sin emisión es justo el fallo que no se nota: la app
+    /// parece funcionar y no la oye nadie.
+    /// </summary>
+    AudioDeviceInfo ResolveBroadcast(out string? notice)
+    {
+        notice = null;
+
+        var found = Resolve(_settings.BroadcastDeviceId, _settings.BroadcastDeviceName);
+        if (!string.IsNullOrEmpty(found.Id) || string.IsNullOrEmpty(_settings.BroadcastDeviceId))
+            return found;
+
+        var lost = _settings.BroadcastDeviceName ?? "La salida de emisión";
+        var replacement = FindVirtualCable();
+
+        notice = replacement is null
+            ? $"«{lost}» ya no está disponible. Elige otra salida de emisión."
+            : $"«{lost}» ya no está; se ha puesto «{replacement.Name}».";
+
+        return replacement ?? NoDevice;
     }
 
     /// <summary>
@@ -144,25 +197,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     void ProposeDefaultDevices()
     {
-        var devices = _deviceService.GetOutputDevices();
-
-        // Recorremos las pistas en orden, no los dispositivos: queremos el "Wave Link SFX" aunque
-        // alfabéticamente vaya después de un "CABLE Input".
-        var cable = VirtualCableHints
-            .Select(hint => devices.FirstOrDefault(d =>
-                d.Name.Contains(hint, StringComparison.CurrentCultureIgnoreCase)))
-            .FirstOrDefault(d => d is not null);
+        var cable = FindVirtualCable();
 
         // Si el cable virtual resulta ser también el dispositivo por defecto, no lo pongas en las dos
         // salidas: sonaría el doble de fuerte por el mismo sitio.
-        var monitor = devices.FirstOrDefault(d => d.IsDefault && d.Id != cable?.Id);
+        var monitor = _deviceService.GetOutputDevices().FirstOrDefault(d => d.IsDefault && d.Id != cable?.Id);
 
         _settings.BroadcastDeviceId = cable?.Id;
+        _settings.BroadcastDeviceName = cable?.Name;
         _settings.MonitorDeviceId = monitor?.Id;
+        _settings.MonitorDeviceName = monitor?.Name;
     }
 
-    AudioDeviceInfo FindDevice(string? id) =>
-        string.IsNullOrEmpty(id) ? NoDevice : Devices.FirstOrDefault(d => d.Id == id) ?? NoDevice;
+    /// <summary>El primer cable virtual que aparezca, en el orden de preferencia de las pistas.</summary>
+    AudioDeviceInfo? FindVirtualCable()
+    {
+        var devices = _deviceService.GetOutputDevices();
+
+        // Recorremos las pistas en orden, no los dispositivos: queremos el canal de Wave Link aunque
+        // alfabéticamente vaya después de un "CABLE Input".
+        return VirtualCableHints
+            .Select(hint => devices.FirstOrDefault(d =>
+                d.Name.Contains(hint, StringComparison.CurrentCultureIgnoreCase)))
+            .FirstOrDefault(d => d is not null);
+    }
 
     /// <summary>Sin salida de emisión el soundboard no llega a Discord: hay que decirlo bien claro.</summary>
     public bool NeedsBroadcastDevice => string.IsNullOrEmpty(BroadcastDevice.Id);
@@ -172,8 +230,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(NeedsBroadcastDevice));
         if (_suppressDeviceSwitch) return;
         var error = _engine.SetBroadcastDevice(string.IsNullOrEmpty(value.Id) ? null : value.Id);
-        _settings.BroadcastDeviceId = string.IsNullOrEmpty(value.Id) ? null : value.Id;
-        Status = error ?? (string.IsNullOrEmpty(value.Id) ? "Sin salida de emisión" : $"Emitiendo por {value.Name}");
+        if (error is not null) _lastDeviceError = error;
+        bool none = string.IsNullOrEmpty(value.Id);
+        _settings.BroadcastDeviceId = none ? null : value.Id;
+        _settings.BroadcastDeviceName = none ? null : value.Name;
+        Status = error ?? (none ? "Sin salida de emisión" : $"Emitiendo por {value.Name}");
         SaveSettings();
     }
 
@@ -181,7 +242,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_suppressDeviceSwitch) return;
         var error = _engine.SetMonitorDevice(string.IsNullOrEmpty(value.Id) ? null : value.Id);
-        _settings.MonitorDeviceId = string.IsNullOrEmpty(value.Id) ? null : value.Id;
+        bool none = string.IsNullOrEmpty(value.Id);
+        _settings.MonitorDeviceId = none ? null : value.Id;
+        _settings.MonitorDeviceName = none ? null : value.Name;
         if (error is not null) Status = error;
         SaveSettings();
     }
