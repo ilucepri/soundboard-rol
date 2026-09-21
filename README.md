@@ -29,7 +29,13 @@ Soundboard  ──[MONITOR]──►  tus cascos   (sólo lo oyes tú)
    Bájale el volumen a gusto; no afecta a lo que oyen los demás.
 3. **En Wave Link**: asegúrate de que el canal **SFX** está incluido en el mix que usas para
    la voz, y de que tu micro también está en ese mix.
-4. **En Discord** → Ajustes → Voz y vídeo → Dispositivo de entrada → el mix de Wave Link.
+4. **En Discord** → Ajustes → Voz y vídeo → Dispositivo de entrada → el mix de Wave Link
+   (`Wave Link MicrophoneFX`).
+5. **Supresión de ruido: en Wave Link, no en Discord.** Discord recibe la mezcla ya hecha y
+   no distingue tu voz de los efectos, así que su supresión de ruido (sobre todo Krisp) se come
+   la música y los efectos. Pon **Supresión de ruido → Ninguna** en Discord y añade el filtro
+   *NVIDIA Noise Removal* (o *Noise Removal* de Elgato si no hay GPU RTX) en los efectos del
+   **canal del micro** en Wave Link. Así se limpia sólo tu voz antes de mezclarla con los efectos.
 
 > Si algún día no usas Wave Link, sirve igual cualquier cable virtual: VB-Cable
 > (`CABLE Input`) o VoiceMeeter. Sólo cambia qué eliges en **EMISIÓN**.
